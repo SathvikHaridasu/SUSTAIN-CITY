@@ -9,7 +9,7 @@ import { toast } from '@/components/ui/use-toast'
 setTimeout(() => {
   toast({
     title: "Welcome to SustainCityPlanner",
-    description: "Plan and create sustainable cities",
+    description: "Plan and create sustainable cities in VR!",
   });
 }, 2000);
 
