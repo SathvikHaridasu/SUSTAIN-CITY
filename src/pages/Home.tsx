@@ -176,7 +176,7 @@ const Home = () => {
 
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-3xl font-bold">Your Cities</h2>
-          <Button onClick={handleCreateNew} className="gap-2 transition-all duration-300 hover:shadow-md bg-eco hover:bg-eco-dark">
+          <Button onClick={handleCreateNew} className="gap-2 transition-all duration-300 hover:shadow-md bg-eco hover:bg-eco-dark text-green-500">
             <PlusCircle className="mr-2 h-4 w-4" />
             Create New City
           </Button>
@@ -187,7 +187,7 @@ const Home = () => {
             <HomeIcon className="h-12 w-12 mx-auto mb-4 text-eco opacity-70" />
             <h3 className="text-xl font-medium mb-4">No cities yet</h3>
             <p className="text-muted-foreground mb-8">Create your first sustainable city design</p>
-            <Button onClick={handleCreateNew} className="gap-2 shadow-button hover:shadow-button-hover transition-all duration-300 hover:scale-[1.03] bg-eco hover:bg-eco-dark">
+            <Button onClick={handleCreateNew} className="gap-2 shadow-button hover:shadow-button-hover transition-all duration-300 hover:scale-[1.03] bg-eco hover:bg-eco-dark text-green-500">
               <PlusCircle className="mr-2 h-4 w-4" />
               Create New City
             </Button>
@@ -297,7 +297,6 @@ const Home = () => {
         <div className="container">
           <div className="flex items-center justify-center gap-2">
             <Leaf className="h-4 w-4 text-eco" />
-            <span>EcoCity Planner — Building sustainable futures together</span>
           </div>
         </div>
       </footer>
