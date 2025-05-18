@@ -21,16 +21,29 @@ const loginFormSchema = z.object({
   }),
 });
 
-const registerFormSchema = loginFormSchema.extend({
+const registerFormSchema = z.object({
   name: z.string().min(2, {
     message: "Name must be at least 2 characters."
+  }),
+  email: z.string().email({
+    message: "Please enter a valid email address."
+  }),
+  password: z.string().min(6, {
+    message: "Password must be at least 6 characters."
+  }),
+  confirmPassword: z.string().min(6, {
+    message: "Please confirm your password."
   })
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match.",
+  path: ["confirmPassword"],
 });
 
 const Login = () => {
   const location = useLocation();
   const [isLogin, setIsLogin] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [isEmailVerificationSent, setIsEmailVerificationSent] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
   
@@ -57,6 +70,7 @@ const Login = () => {
       name: "",
       email: "",
       password: "",
+      confirmPassword: "",
     },
   });
 
@@ -91,15 +105,22 @@ const Login = () => {
   const onSubmitRegister = async (values: z.infer<typeof registerFormSchema>) => {
     setIsLoading(true);
     try {
-      const { success, error } = await register(values.email, values.password, values.name);
+      const { success, error, requiresEmailVerification } = await register(values.email, values.password, values.name);
+      
       if (success) {
-        toast({
-          title: "Registration successful!",
-          description: "Please check your email to verify your account.",
-        });
-        // Some Supabase configs require email verification before login
-        // so we'll stay on the login page
-        setIsLogin(true);
+        if (requiresEmailVerification) {
+          setIsEmailVerificationSent(true);
+          toast({
+            title: "Registration successful!",
+            description: "Please check your email to verify your account.",
+          });
+        } else {
+          toast({
+            title: "Account created!",
+            description: "Welcome to SustainCityPlanner.",
+          });
+          navigate('/home');
+        }
       } else {
         toast({
           title: "Registration failed",
@@ -122,6 +143,7 @@ const Login = () => {
     setIsLogin(!isLogin);
     loginForm.reset();
     registerForm.reset();
+    setIsEmailVerificationSent(false);
   };
 
   return (
@@ -130,7 +152,7 @@ const Login = () => {
         <div className="flex items-center justify-center mb-3">
           <SproutIcon className="h-10 w-10 text-teal-600 mr-2" />
           <h1 className="text-4xl font-bold bg-gradient-to-r from-teal-600 to-emerald-600 text-transparent bg-clip-text">
-            SustainCityPlanner
+            SustainCity
           </h1>
         </div>
         <p className="text-muted-foreground max-w-md px-4">
@@ -140,13 +162,28 @@ const Login = () => {
       
       <Card className="w-[350px] shadow-lg">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">{isLogin ? "Login" : "Create Account"}</CardTitle>
+          <CardTitle className="text-2xl">
+            {isEmailVerificationSent ? "Verification Email Sent" : (isLogin ? "Login" : "Create Account")}
+          </CardTitle>
           <CardDescription>
-            {isLogin ? "Sign in to access your city designs" : "Register to start creating sustainable cities"}
+            {isEmailVerificationSent 
+              ? "Please check your inbox to verify your email" 
+              : (isLogin ? "Sign in to access your city designs" : "Register to start creating sustainable cities")}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {isLogin ? (
+          {isEmailVerificationSent ? (
+            <div className="text-center py-2">
+              <p className="mb-4">We've sent a verification link to your email address. Please check your inbox and click the link to activate your account.</p>
+              <Button 
+                variant="outline" 
+                className="w-full mt-2"
+                onClick={() => setIsLogin(true)}
+              >
+                Return to Login
+              </Button>
+            </div>
+          ) : isLogin ? (
             <Form {...loginForm}>
               <form onSubmit={loginForm.handleSubmit(onSubmitLogin)} className="space-y-4">
                 <FormField
@@ -216,35 +253,50 @@ const Login = () => {
                     <FormItem>
                       <FormLabel>Password</FormLabel>
                       <FormControl>
-                        <Input type="password" placeholder="Enter your password" {...field} />
+                        <Input type="password" placeholder="Create a password" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={registerForm.control}
+                  name="confirmPassword"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Confirm Password</FormLabel>
+                      <FormControl>
+                        <Input type="password" placeholder="Confirm your password" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
                 <Button type="submit" className="w-full bg-teal-600 hover:bg-teal-700" disabled={isLoading}>
-                  {isLoading ? "Loading..." : "Register"}
+                  {isLoading ? "Creating Account..." : "Register"}
                 </Button>
               </form>
             </Form>
           )}
         </CardContent>
-        <CardFooter>
-          <Button
-            variant="link"
-            className="mx-auto"
-            onClick={toggleForm}
-            disabled={isLoading}
-          >
-            {isLogin
-              ? "Don't have an account? Sign up"
-              : "Already have an account? Sign in"}
-          </Button>
-        </CardFooter>
+        {!isEmailVerificationSent && (
+          <CardFooter>
+            <Button
+              variant="link"
+              className="mx-auto"
+              onClick={toggleForm}
+              disabled={isLoading}
+            >
+              {isLogin
+                ? "Don't have an account? Sign up"
+                : "Already have an account? Sign in"}
+            </Button>
+          </CardFooter>
+        )}
       </Card>
       
       <div className="mt-8 text-center text-sm text-muted-foreground">
-        <p>SustainCityPlanner &copy; {new Date().getFullYear()} - Building sustainable futures together</p>
+        <p>SustainCity &copy; {new Date().getFullYear()} - Building sustainable futures together</p>
       </div>
     </div>
   );

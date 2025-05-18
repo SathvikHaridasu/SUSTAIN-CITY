@@ -1,20 +1,42 @@
-
-import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import Header from '@/components/Header';
-import CityLayout from '@/components/city/CityLayout';
-import CityToolbar from '@/components/city/CityToolbar';
-import { useCityPlanner } from '@/hooks/useCityPlanner';
-import { getCurrentUser } from '@/utils/auth';
-import { BUILDINGS, Building } from '@/utils/buildings';
-import { useToast } from '@/components/ui/use-toast';
+import React, { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import Header from "@/components/Header";
+import CityLayout from "@/components/city/CityLayout";
+import CityToolbar from "@/components/city/CityToolbar";
+import { useCityPlanner } from "@/hooks/useCityPlanner";
+import { getCurrentUser } from "@/utils/auth";
+import { BUILDINGS, Building } from "@/utils/buildings";
+import { useToast } from "@/components/ui/use-toast";
 
 const Index = () => {
   const [
-    { grid, metrics, cityName, selectedBuilding, isLoading, isSaving, currentSeason, currentTime, achievements, featureState },
-    { setGrid, setCityName, setSelectedBuilding, handleCellUpdate, handleSave, handleReset, handleCreateNewCity, loadCityData, handleSeasonChange, handleTimeChange, handleSelectTemplate, featureActions }
+    {
+      grid,
+      metrics,
+      cityName,
+      selectedBuilding,
+      isLoading,
+      isSaving,
+      currentSeason,
+      currentTime,
+      featureState,
+    },
+    {
+      setGrid,
+      setCityName,
+      setSelectedBuilding,
+      handleCellUpdate,
+      handleSave,
+      handleReset,
+      handleCreateNewCity,
+      loadCityData,
+      handleSeasonChange,
+      handleTimeChange,
+      handleSelectTemplate,
+      featureActions,
+    },
   ] = useCityPlanner();
-  
+
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -24,19 +46,19 @@ const Index = () => {
       try {
         const user = await getCurrentUser();
         if (!user) {
-          navigate('/login');
+          navigate("/login");
           return;
         }
 
         // Make BUILDINGS globally available for debugging
         window.BUILDINGS = BUILDINGS;
-        
+
         // Make the setSelectedBuilding function available globally
         window.setSelectedBuilding = (building: Building) => {
           console.log("Setting selected building:", building);
           setSelectedBuilding(building);
         };
-        
+
         await loadCityData();
       } catch (error) {
         console.error("Authentication error:", error);
@@ -45,12 +67,12 @@ const Index = () => {
           description: "Please login again",
           variant: "destructive",
         });
-        navigate('/login');
+        navigate("/login");
       }
     };
-    
+
     checkAuthAndLoadCity();
-    
+
     // Clean up global reference on unmount
     return () => {
       delete window.setSelectedBuilding;
@@ -61,7 +83,7 @@ const Index = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Alt+S shortcut to save the city
-      if (e.altKey && e.code === 'KeyS') {
+      if (e.altKey && e.code === "KeyS") {
         e.preventDefault();
         handleSave();
         toast({
@@ -70,18 +92,18 @@ const Index = () => {
         });
       }
     };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    
+
+    window.addEventListener("keydown", handleKeyDown);
+
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [handleSave, toast]);
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-background to-muted/30">
       <Header onReset={handleReset}>
-        <CityToolbar 
+        <CityToolbar
           cityName={cityName}
           onCityNameChange={setCityName}
           onSave={handleSave}
@@ -92,11 +114,11 @@ const Index = () => {
           onSeasonChange={handleSeasonChange}
           currentTime={currentTime}
           onTimeChange={handleTimeChange}
-          achievements={achievements}
           onSelectTemplate={handleSelectTemplate}
+          onGridUpdate={setGrid}
         />
       </Header>
-      
+
       <CityLayout
         grid={grid}
         setGrid={setGrid}
@@ -109,7 +131,8 @@ const Index = () => {
         featureActions={featureActions}
       >
         <footer className="py-4 px-6 text-center text-sm text-muted-foreground">
-          EcoCity Planner - Build sustainable cities with real-time environmental feedback
+          Sustain City - Build sustainable cities with real-time environmental
+          impact insights
         </footer>
       </CityLayout>
     </div>

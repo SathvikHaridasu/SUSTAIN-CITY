@@ -36,6 +36,7 @@ export interface CityPlannerFeatureState {
   selectedBuildingForUpgrade: Building | null;
   selectedBuildingLocation: { x: number; y: number } | null;
   popupDisaster: Disaster | null;
+  streetViewActive: boolean;  // Added missing property
 }
 
 export interface CityPlannerFeatureActions {
@@ -47,6 +48,7 @@ export interface CityPlannerFeatureActions {
   hideUpgradePanel: () => void;
   applyBuildingUpgrade: (location: { x: number; y: number }, upgradeId: string) => void;
   setSelectedBuilding: (building: Building | null) => void;
+  setStreetViewActive: (active: boolean) => void;  // Added missing action
 }
 
 export const useCityPlannerFeatures = (
@@ -65,6 +67,7 @@ export const useCityPlannerFeatures = (
   const [selectedBuildingForUpgrade, setSelectedBuildingForUpgrade] = useState<Building | null>(null);
   const [selectedBuildingLocation, setSelectedBuildingLocation] = useState<{ x: number; y: number } | null>(null);
   const [popupDisaster, setPopupDisaster] = useState<Disaster | null>(null);
+  const [streetViewActive, setStreetViewActive] = useState<boolean>(false);  // Added street view state
   
   const simulationInterval = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
@@ -305,6 +308,11 @@ export const useCityPlannerFeatures = (
     }
   }, []);
 
+  // Added the setStreetViewActive callback function
+  const handleSetStreetViewActive = useCallback((active: boolean) => {
+    setStreetViewActive(active);
+  }, []);
+
   // Feature state and actions
   const featureState: CityPlannerFeatureState = {
     timeState,
@@ -318,6 +326,7 @@ export const useCityPlannerFeatures = (
     selectedBuildingForUpgrade,
     selectedBuildingLocation,
     popupDisaster,
+    streetViewActive,  // Added the property to the state
   };
 
   // Include the setSelectedBuilding in the featureActions object
@@ -330,6 +339,7 @@ export const useCityPlannerFeatures = (
     hideUpgradePanel,
     applyBuildingUpgrade: handleApplyBuildingUpgrade,
     setSelectedBuilding,
+    setStreetViewActive: handleSetStreetViewActive,  // Added the action to the object
   };
 
   return [featureState, featureActions];

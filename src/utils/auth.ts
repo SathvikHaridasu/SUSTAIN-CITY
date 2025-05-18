@@ -40,8 +40,8 @@ export const login = async (email: string, password: string): Promise<{ success:
   }
 };
 
-// Sign up with email and password
-export const register = async (email: string, password: string, name?: string): Promise<{ success: boolean; error?: string }> => {
+// Sign up with email and password and automatically sign in if possible
+export const register = async (email: string, password: string, name?: string): Promise<{ success: boolean; error?: string; requiresEmailVerification?: boolean }> => {
   try {
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -57,9 +57,17 @@ export const register = async (email: string, password: string, name?: string): 
       return { success: false, error: error.message };
     }
     
-    // Supabase signup doesn't always immediately log in the user
-    // in some configurations, email confirmation may be required
-    return { success: true };
+    // Check if email confirmation is required
+    // If session exists, user is automatically signed in
+    if (data.session) {
+      return { success: true };
+    } else {
+      // In some Supabase configurations, email confirmation is required
+      return { 
+        success: true, 
+        requiresEmailVerification: true 
+      };
+    }
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to register' };
   }

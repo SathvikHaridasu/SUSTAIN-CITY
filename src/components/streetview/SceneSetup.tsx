@@ -1,6 +1,7 @@
 
 import * as THREE from 'three';
 import { TimeOfDay, TIME_SETTINGS } from '@/utils/dayNightCycle';
+import { createOptimizedRenderer, createGroundPlane, createAmbientLight, createDirectionalLight, createHemisphereLight } from '@/utils/threejsHelpers';
 
 export interface SceneSetupOptions {
   width: number;
@@ -11,30 +12,27 @@ export interface SceneSetupOptions {
 export const setupScene = (options: SceneSetupOptions) => {
   const { width, height, currentTime } = options;
   
-  // Initialize scene with appropriate background and fog
+  // Initialize scene with appropriate background and simplified fog
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(TIME_SETTINGS[currentTime].skyColor);
-  scene.fog = new THREE.Fog(TIME_SETTINGS[currentTime].skyColor, 10, 30);
+  scene.fog = new THREE.Fog(TIME_SETTINGS[currentTime].skyColor, 15, 35);
   
-  // Create perspective camera with optimized settings
+  // Create perspective camera with optimized settings for WebXR
   const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 40);
+  camera.position.set(0, 1.6, 0); // Default eye height for VR mode (1.6m average eye height)
+  camera.layers.enable(0); // Enable default layer
   
-  // Create WebGL renderer with optimized settings
-  const renderer = new THREE.WebGLRenderer({ 
-    antialias: false, // Disable antialiasing for better performance
-    powerPreference: 'high-performance',
-    precision: 'mediump', // Use medium precision for better performance
+  // Create WebGL renderer with optimized settings using our helper
+  const renderer = createOptimizedRenderer(width, height, {
+    antialias: true, // Always enable antialiasing for VR
+    xrCompatible: true // Important for WebXR compatibility
   });
-  renderer.setSize(width, height);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   
-  // Performance optimizations
-  renderer.setPixelRatio(window.devicePixelRatio > 1 ? 1.5 : 1);
-  renderer.setClearColor(TIME_SETTINGS[currentTime].skyColor);
+  // Ensure proper WebXR configuration
+  renderer.xr.enabled = true;
   
-  // Setup ground plane
-  const ground = createGround();
+  // Setup ground plane using our helper
+  const ground = createGroundPlane(40, 40, 10, 10); // Reduced ground segments
   scene.add(ground);
   
   // Add lighting
@@ -44,51 +42,63 @@ export const setupScene = (options: SceneSetupOptions) => {
   const boundaryWalls = createBoundaryWalls();
   boundaryWalls.forEach(wall => scene.add(wall));
   
+  // Set up VR-style camera controls
+  // Create camera rotation objects
+  const pitchObject = new THREE.Object3D(); // For looking up and down
+  const yawObject = new THREE.Object3D();   // For looking left and right
+  
+  // Position camera at eye level
+  pitchObject.position.y = 1.6; // Eye level in meters - standard VR height
+  yawObject.add(pitchObject);
+  pitchObject.add(camera);
+  
   return {
     scene,
     camera,
     renderer,
-    boundaryWalls
+    boundaryWalls,
+    pitchObject,
+    yawObject
   };
 };
 
 export const createGround = () => {
-  // Use lower resolution for better performance
-  const groundGeometry = new THREE.PlaneGeometry(40, 40, 20, 20);
+  // Use significantly lower resolution for better performance
+  const groundGeometry = new THREE.PlaneGeometry(40, 40, 10, 10);
   
-  // Create a canvas-based ground texture
+  // Create a canvas-based ground texture with simpler patterns
   const canvas = document.createElement('canvas');
-  canvas.width = 256; // Reduced size for better performance
-  canvas.height = 256;
+  canvas.width = 128; // Even smaller texture
+  canvas.height = 128;
   const ctx = canvas.getContext('2d');
   
   if (ctx) {
     ctx.fillStyle = '#d2e0c8';
-    ctx.fillRect(0, 0, 256, 256);
+    ctx.fillRect(0, 0, 128, 128);
     
-    // Add some texture variation
+    // Add some texture variation with fewer elements
     ctx.fillStyle = '#c2d0b8';
-    for (let i = 0; i < 400; i++) {
-      const x = Math.random() * 256;
-      const y = Math.random() * 256;
-      const size = Math.random() * 4 + 1;
+    for (let i = 0; i < 200; i++) {
+      const x = Math.random() * 128;
+      const y = Math.random() * 128;
+      const size = Math.random() * 3 + 1;
       ctx.fillRect(x, y, size, size);
     }
     
-    // Add grid lines for roads
+    // Simpler grid lines
     ctx.strokeStyle = '#b2c0a8';
     ctx.lineWidth = 1;
-    const gridSize = 256 / 20;
+    const gridSize = 128 / 10; // Fewer grid lines
     
-    for (let i = 0; i <= 20; i++) {
+    for (let i = 0; i <= 10; i++) {
       ctx.beginPath();
       ctx.moveTo(i * gridSize, 0);
-      ctx.lineTo(i * gridSize, 256);
+      ctx.lineTo(i * gridSize, 128);
       ctx.stroke();
       
       ctx.beginPath();
       ctx.moveTo(0, i * gridSize);
-      ctx.lineTo(256, i * gridSize);
+      ctx.lineTo(128, i * gridSize);
       ctx.stroke();
     }
   }
@@ -112,37 +122,23 @@ export const createGround = () => {
 };
 
 export const addLighting = (scene: THREE.Scene, currentTime: TimeOfDay) => {
-  // Add ambient light
-  const ambientLight = new THREE.AmbientLight(
+  // Add ambient light using helper
+  const ambientLight = createAmbientLight(
     0xffffff,
     TIME_SETTINGS[currentTime].ambientLightIntensity
   );
   scene.add(ambientLight);
 
-  // Add directional light (sun/moon) with shadows - optimized shadow settings
-  const directionalLight = new THREE.DirectionalLight(
+  // Add directional light using helper
+  const directionalLight = createDirectionalLight(
     TIME_SETTINGS[currentTime].directionalLightColor,
-    TIME_SETTINGS[currentTime].directionalLightIntensity
+    TIME_SETTINGS[currentTime].directionalLightIntensity,
+    new THREE.Vector3(15, 25, 15)
   );
-  directionalLight.position.set(15, 25, 15);
-  directionalLight.castShadow = true;
-  
-  // Lower resolution for better performance
-  directionalLight.shadow.mapSize.width = 1024;
-  directionalLight.shadow.mapSize.height = 1024;
-  
-  // Optimize shadow camera
-  directionalLight.shadow.camera.near = 0.5;
-  directionalLight.shadow.camera.far = 50;
-  directionalLight.shadow.camera.left = -20;
-  directionalLight.shadow.camera.right = 20;
-  directionalLight.shadow.camera.top = 20;
-  directionalLight.shadow.camera.bottom = -20;
-  directionalLight.shadow.bias = -0.0005; // Reduce shadow acne
   scene.add(directionalLight);
   
-  // Add subtle hemisphere light for better ambient illumination
-  const hemisphereLight = new THREE.HemisphereLight(
+  // Add hemisphere light using helper
+  const hemisphereLight = createHemisphereLight(
     TIME_SETTINGS[currentTime].skyColor, 
     0x444444, 
     0.2
@@ -152,7 +148,7 @@ export const addLighting = (scene: THREE.Scene, currentTime: TimeOfDay) => {
 
 export const createBoundaryWalls = () => {
   const walls: THREE.Mesh[] = [];
-  // Use simpler geometry for invisible walls
+  // Use even simpler geometry for invisible walls
   const wallGeometry = new THREE.BoxGeometry(40, 5, 1);
   const wallMaterial = new THREE.MeshBasicMaterial({ 
     color: 0x888888,

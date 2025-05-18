@@ -247,31 +247,33 @@ const EnvironmentalMetricsComponent: React.FC<EnvironmentalMetricsProps> = ({ me
               </div>
 
               <div className="w-24 h-24">
-                <PieChart width={100} height={100}>
-                  <Pie
-                    data={energyData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={20}
-                    outerRadius={40}
-                    paddingAngle={2}
-                    dataKey="value"
-                    label={(entry) => `${entry.value}`}
-                    labelLine={false}
-                  >
-                    {energyData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.fill} />
-                    ))}
-                  </Pie>
-                  <ChartTooltip 
-                    content={
-                      <ChartTooltipContent 
-                        labelKey="name"
-                        formatter={(value) => [`${value}%`, 'Value']}
-                      />
-                    } 
-                  />
-                </PieChart>
+                <ChartContainer config={chartConfig}>
+                  <PieChart width={100} height={100}>
+                    <Pie
+                      data={energyData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={20}
+                      outerRadius={40}
+                      paddingAngle={2}
+                      dataKey="value"
+                      label={(entry) => `${entry.value}`}
+                      labelLine={false}
+                    >
+                      {energyData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <ChartTooltip 
+                      content={
+                        <ChartTooltipContent 
+                          labelKey="name"
+                          formatter={(value) => [`${value}%`, 'Value']}
+                        />
+                      } 
+                    />
+                  </PieChart>
+                </ChartContainer>
               </div>
             </div>
             

@@ -10,6 +10,7 @@ export interface DayNightSettings {
   buildingLightsOn: boolean;
 }
 
+// Pre-computed settings for better performance
 export const TIME_SETTINGS: Record<TimeOfDay, DayNightSettings> = {
   dawn: {
     timeOfDay: 'dawn',
@@ -45,8 +46,14 @@ export const TIME_SETTINGS: Record<TimeOfDay, DayNightSettings> = {
   }
 };
 
+// Pre-computed next time values for better performance
+const NEXT_TIME: Record<TimeOfDay, TimeOfDay> = {
+  dawn: 'day',
+  day: 'dusk',
+  dusk: 'night',
+  night: 'dawn'
+};
+
 export const getNextTimeOfDay = (current: TimeOfDay): TimeOfDay => {
-  const times: TimeOfDay[] = ['dawn', 'day', 'dusk', 'night'];
-  const currentIndex = times.indexOf(current);
-  return times[(currentIndex + 1) % times.length];
+  return NEXT_TIME[current];
 };

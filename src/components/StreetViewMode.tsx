@@ -1,21 +1,24 @@
-
-import React, { useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GridItem } from '@/utils/environmental';
-import { Building } from '@/utils/buildings';
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { TimeOfDay, TIME_SETTINGS } from '@/utils/dayNightCycle';
+import React, { useEffect, useRef, useState, useMemo } from "react";
+import * as THREE from "three";
+import { GridItem } from "@/utils/environmental";
+import { TimeOfDay, TIME_SETTINGS } from "@/utils/dayNightCycle";
+import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
 
 // Import refactored components
-import { setupScene, createBoundaryWalls } from './streetview/SceneSetup';
-import { addBuildingToScene } from './streetview/BuildingRenderer';
-import { addEnvironmentalDetails } from './streetview/EnvironmentalDetails';
-import { createCharacter, updateCharacterPosition } from './streetview/CharacterController';
-import CityMiniMap from './streetview/CityMiniMap';
-import StreetViewTutorial from './streetview/StreetViewTutorial';
-import StreetViewControls from './streetview/StreetViewControls';
-import PositionIndicator from './streetview/PositionIndicator';
+import { setupScene } from "./streetview/SceneSetup";
+import { addBuildingToScene } from "./streetview/BuildingRenderer";
+import { addEnvironmentalDetails } from "./streetview/EnvironmentalDetails";
+import {
+  createCharacter,
+  updateCharacterPosition,
+} from "./streetview/CharacterController";
+import CityMiniMap from "./streetview/CityMiniMap";
+import StreetViewTutorial from "./streetview/StreetViewTutorial";
+import StreetViewControls from "./streetview/StreetViewControls";
+import PositionIndicator from "./streetview/PositionIndicator";
+
+// Import the VR-style rotation function
+import { applyVRStyleRotation } from "@/utils/threejsHelpers";
 
 interface StreetViewModeProps {
   grid: GridItem[][];
@@ -30,14 +33,18 @@ const StreetViewMode: React.FC<StreetViewModeProps> = ({
   currentTime,
   isOpen,
   onClose,
-  initialPosition = { x: 10, y: 10 }
+  initialPosition = { x: 10, y: 10 },
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({ x: initialPosition.x, y: initialPosition.y, height: 0 });
+  const vrButtonRef = useRef<HTMLElement | null>(null);
+  const [position, setPosition] = useState({
+    x: initialPosition.x,
+    y: initialPosition.y,
+    height: 0,
+  });
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const controlsRef = useRef<OrbitControls | null>(null);
   const characterRef = useRef<THREE.Group | null>(null);
   const collisionMeshesRef = useRef<THREE.Mesh[]>([]);
   const isMovingRef = useRef<{
@@ -45,13 +52,17 @@ const StreetViewMode: React.FC<StreetViewModeProps> = ({
     backward: boolean;
     left: boolean;
     right: boolean;
+    up: boolean;     // Add up movement state
+    down: boolean;    // Add down movement state
     rightMouseDown: boolean;
   }>({
     forward: false,
     backward: false,
     left: false,
     right: false,
-    rightMouseDown: false
+    up: false,       // Initialize up movement
+    down: false,      // Initialize down movement
+    rightMouseDown: false,
   });
   const clockRef = useRef(new THREE.Clock());
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -64,20 +75,56 @@ const StreetViewMode: React.FC<StreetViewModeProps> = ({
   const animationFrameIdRef = useRef<number | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const initAttemptRef = useRef<number>(0);
-  
-  // Movement vectors and rotation state
-  const pitchObject = useRef(new THREE.Object3D());
-  const yawObject = useRef(new THREE.Object3D());
+  const sceneInitializedRef = useRef<boolean>(false);
+
+  // VR-style movement and rotation state
+  const pitchObject = useRef<THREE.Object3D>(new THREE.Object3D());
+  const yawObject = useRef<THREE.Object3D>(new THREE.Object3D());
   const [isPointerLocked, setIsPointerLocked] = useState(false);
-  const pitchLimitRef = useRef({min: -Math.PI/2 * 0.95, max: Math.PI/2 * 0.95}); // Limit to about ±85°
-  
+  const vrModeRef = useRef<boolean>(true);
+
   // Sound effects and tutorial state
   const [isSoundEnabled, setIsSoundEnabled] = useState(false);
   const [showTutorial, setShowTutorial] = useState(true);
 
-  // Performance optimization
-  const fpsLimit = 60;
+  // WebXR support
+  const [isVRSupported, setIsVRSupported] = useState(false);
+  const [isInVR, setIsInVR] = useState(false);
+
+  // Performance optimization with adaptive frame rate targeting
+  const fpsLimit = 60; // Target 60 FPS
   const fpsInterval = 1000 / fpsLimit;
+  const lastFrameTimeRef = useRef<number>(0);
+  const frameRateHistoryRef = useRef<number[]>([]);
+  const adaptiveQualityRef = useRef<number>(1.0); // Quality modifier (1.0 = full quality)
+  const frameCountRef = useRef<number>(0);
+  const lastFpsUpdateRef = useRef<number>(0);
+  const currentFpsRef = useRef<number>(0);
+
+  // Mouse sensitivity for VR-style look controls
+  const mouseSensitivity = 0.002;
+
+  // Memoized grid to prevent unnecessary rebuilds
+  const memoizedGrid = useMemo(() => grid, [JSON.stringify(grid)]);
+
+  useEffect(() => {
+    // Check if WebXR is supported
+    if ("xr" in navigator) {
+      navigator.xr
+        ?.isSessionSupported("immersive-vr")
+        .then((supported) => {
+          setIsVRSupported(supported);
+          console.log("WebXR VR support:", supported);
+        })
+        .catch((err) => {
+          console.error("Error checking WebXR support:", err);
+          setIsVRSupported(false);
+        });
+    } else {
+      console.log("WebXR not available in this browser");
+      setIsVRSupported(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (isOpen && initialPosition) {
@@ -85,7 +132,7 @@ const StreetViewMode: React.FC<StreetViewModeProps> = ({
       setPosition({ x: initialPosition.x, y: initialPosition.y, height: 0 });
       setIsTransitioning(true);
       setShowTutorial(true);
-      
+
       // Reset transition state after animation completes
       setTimeout(() => {
         setIsTransitioning(false);
@@ -102,214 +149,352 @@ const StreetViewMode: React.FC<StreetViewModeProps> = ({
   useEffect(() => {
     if (sceneRef.current && cameraRef.current && rendererRef.current) {
       const timeSettings = TIME_SETTINGS[currentTime];
-      
+
       // Update background color
       sceneRef.current.background = new THREE.Color(timeSettings.skyColor);
       sceneRef.current.fog = new THREE.Fog(timeSettings.skyColor, 10, 30);
-      
+
       // Mark that renderer needs update
       rendererNeedsUpdateRef.current = true;
     }
   }, [currentTime]);
 
+  // PointerLock API functions for VR-style controls
+  const requestPointerLock = () => {
+    if (!containerRef.current || isInVR) return;
+
+    const element = containerRef.current;
+
+    element.requestPointerLock =
+      element.requestPointerLock ||
+      (element as any).mozRequestPointerLock ||
+      (element as any).webkitRequestPointerLock;
+
+    if (element.requestPointerLock) {
+      element.requestPointerLock();
+    }
+  };
+
+  const exitPointerLock = () => {
+    if (isInVR) return; // Don't exit pointer lock in VR mode
+
+    document.exitPointerLock =
+      document.exitPointerLock ||
+      (document as any).mozExitPointerLock ||
+      (document as any).webkitExitPointerLock;
+
+    if (document.exitPointerLock) {
+      document.exitPointerLock();
+    }
+  };
+
   // Main scene initialization effect
   useEffect(() => {
-    if (!isOpen || !containerRef.current) return;
-    
+    if (!isOpen || !containerRef.current || sceneInitializedRef.current) return;
+
+    console.log(
+      "Initializing Street View scene with VR-style controls and WebXR support"
+    );
+
     // Increase the attempt counter to track initialization attempts
     initAttemptRef.current += 1;
-    console.log(`Initializing Street View (attempt ${initAttemptRef.current})`);
+    console.log(
+      `Initializing Sustain City Street View (attempt ${initAttemptRef.current})`
+    );
 
     try {
       // Initialize Three.js scene with error handling
-      const { scene, camera, renderer, boundaryWalls } = setupScene({
-        width: containerRef.current.clientWidth || 800,
-        height: containerRef.current.clientHeight || 600,
-        currentTime
+      const {
+        scene,
+        camera,
+        renderer,
+        boundaryWalls,
+        pitchObject: pitch,
+        yawObject: yaw,
+      } = setupScene({
+        width: containerRef.current.clientWidth,
+        height: containerRef.current.clientHeight,
+        currentTime,
       });
-      
-      // Use lower resolution for better performance
-      renderer.setPixelRatio(window.devicePixelRatio > 1 ? 1.5 : 1);
-      
+
+      // Enable WebXR support
+      if (renderer.xr) {
+        renderer.xr.enabled = true;
+
+        // Add VR button but keep a reference to remove it later
+        if (isVRSupported) {
+          const vrButton = VRButton.createButton(renderer);
+          vrButton.style.position = "absolute";
+          vrButton.style.bottom = "20px";
+          vrButton.style.left = "50%";
+          vrButton.style.transform = "translateX(-50%)";
+          vrButton.style.zIndex = "100";
+          vrButton.style.display = "none"; // We'll manage showing it through our own UI
+          document.body.appendChild(vrButton);
+          vrButtonRef.current = vrButton;
+
+          // Listen for session start/end
+          renderer.xr.addEventListener("sessionstart", () => {
+            console.log("WebXR session started");
+            setIsInVR(true);
+
+            // Position the camera properly in VR mode
+            if (characterRef.current) {
+              const position = characterRef.current.position;
+              camera.position.set(position.x, 1.6, position.z); // Set eye height for VR
+            }
+          });
+
+          renderer.xr.addEventListener("sessionend", () => {
+            console.log("WebXR session ended");
+            setIsInVR(false);
+          });
+        }
+      }
+
+      // Set references to track objects
       sceneRef.current = scene;
       cameraRef.current = camera;
       rendererRef.current = renderer;
-      containerRef.current.appendChild(renderer.domElement);
-      
-      // Add boundary walls to collision meshes
-      collisionMeshesRef.current = [...boundaryWalls];
-      
-      // Setup camera position and rotation objects
-      // Position character and camera at ground level (y=0)
-      const eyeLevel = 0.95;
-      camera.position.set(position.x - 9.5, eyeLevel, position.y - 9.5);
-      yawObject.current.position.set(position.x - 9.5, eyeLevel, position.y - 9.5);
-      pitchObject.current.rotation.x = 0;
-      yawObject.current.rotation.y = 0;
-      
-      // Setup yaw and pitch objects for full 360° rotation
-      yawObject.current.add(pitchObject.current);
-      pitchObject.current.add(camera);
-      scene.add(yawObject.current);
+      pitchObject.current = pitch;
+      yawObject.current = yaw;
 
-      // Initialize controls for mouse movement tracking
-      const controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.05;
-      controls.screenSpacePanning = false;
-      controls.maxPolarAngle = Math.PI - 0.1;
-      controls.minPolarAngle = 0.1;
-      controls.enableZoom = false;
-      controls.enablePan = false;
-      controls.enabled = false; // Disable by default, we'll use custom right-click rotation
-      controlsRef.current = controls;
+      // Add renderer to DOM
+      containerRef.current.appendChild(renderer.domElement);
+
+      // Add boundary walls for collision detection
+      boundaryWalls.forEach((wall) => scene.add(wall));
+      collisionMeshesRef.current = [...boundaryWalls];
+
+      // Position character and camera at ground level initially
+      const eyeLevel = 0.95;
+      yawObject.current.position.set(
+        position.x - 9.5,
+        eyeLevel,
+        position.y - 9.5
+      );
+      scene.add(yawObject.current);
 
       // Audio setup
       const audioListener = new THREE.AudioListener();
       camera.add(audioListener);
       audioListenerRef.current = audioListener;
-      
+
       const footstepsAudio = new THREE.Audio(audioListener);
       footstepsAudioRef.current = footstepsAudio;
       scene.add(footstepsAudio);
-      
+
       const audioLoader = new THREE.AudioLoader();
       audioLoaderRef.current = audioLoader;
 
       // Create character (hidden in first person but used for collision detection)
       const character = createCharacter(scene);
       characterRef.current = character;
-      
+
       // Position character at the starting point - ENSURE ground level (y=0)
       character.position.set(position.x - 9.5, 0, position.y - 9.5);
-      
-      // Build the city from the grid data
-      buildCity(scene, grid);
 
-      // Handle window resize
+      // Use memoized grid to prevent unnecessary rebuilds
+      buildCity(scene, memoizedGrid);
+
+      // Handle window resize with debounce for improved performance
+      let resizeTimeout: NodeJS.Timeout;
       const handleResize = () => {
-        if (!containerRef.current || !cameraRef.current || !rendererRef.current) return;
-        
-        const width = containerRef.current.clientWidth;
-        const height = containerRef.current.clientHeight;
-        
-        cameraRef.current.aspect = width / height;
-        cameraRef.current.updateProjectionMatrix();
-        
-        rendererRef.current.setSize(width, height);
-        rendererNeedsUpdateRef.current = true;
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+          if (
+            !containerRef.current ||
+            !cameraRef.current ||
+            !rendererRef.current
+          )
+            return;
+
+          const width = containerRef.current.clientWidth;
+          const height = containerRef.current.clientHeight;
+
+          cameraRef.current.aspect = width / height;
+          cameraRef.current.updateProjectionMatrix();
+
+          rendererRef.current.setSize(width, height, false); // false to improve performance
+          rendererNeedsUpdateRef.current = true;
+        }, 250); // Wait 250ms after resize events stop
       };
 
-      window.addEventListener('resize', handleResize);
+      window.addEventListener("resize", handleResize);
 
-      // Right-click handling for camera rotation (Roblox-style)
+      // VR-style mouse look controls
+      const handleMouseMove = (e: MouseEvent) => {
+        // Only apply VR-style rotation if pointer is locked or right mouse button is down
+        // and not in VR mode
+        if (
+          !isInVR &&
+          (isPointerLocked || isMovingRef.current.rightMouseDown)
+        ) {
+          const movementX =
+            e.movementX ||
+            (e as any).mozMovementX ||
+            (e as any).webkitMovementX ||
+            0;
+          const movementY =
+            e.movementY ||
+            (e as any).mozMovementY ||
+            (e as any).webkitMovementY ||
+            0;
+
+          if (pitchObject.current && yawObject.current) {
+            // Apply VR-style rotation
+            applyVRStyleRotation(
+              pitchObject.current,
+              yawObject.current,
+              movementX,
+              movementY,
+              mouseSensitivity
+            );
+            rendererNeedsUpdateRef.current = true;
+          }
+        }
+      };
+
+      // Mouse button handlers
       const handleMouseDown = (e: MouseEvent) => {
-        if (e.button === 2) { // Right mouse button
+        if (e.button === 2 && !isInVR) {
+          // Right mouse button
           isMovingRef.current.rightMouseDown = true;
           if (containerRef.current) {
-            containerRef.current.style.cursor = 'grabbing';
+            containerRef.current.style.cursor = "grabbing";
           }
+        } else if (e.button === 0 && !isInVR) {
+          // Left mouse button
+          // Request pointer lock for VR-style look
+          requestPointerLock();
         }
       };
-      
+
       const handleMouseUp = (e: MouseEvent) => {
-        if (e.button === 2) { // Right mouse button
+        if (e.button === 2 && !isInVR) {
+          // Right mouse button
           isMovingRef.current.rightMouseDown = false;
           if (containerRef.current) {
-            containerRef.current.style.cursor = 'grab';
+            containerRef.current.style.cursor = "grab";
           }
         }
       };
 
-      // Mouse movement handler for camera rotation - ALLOW full 360° rotation
-      const mouseSensitivity = 0.002; // Adjust sensitivity as needed
-      
-      const handleMouseMove = (e: MouseEvent) => {
-        if (!isMovingRef.current.rightMouseDown || !yawObject.current || !pitchObject.current) return;
-        
-        const movementX = e.movementX || (e as any).mozMovementX || (e as any).webkitMovementX || 0;
-        const movementY = e.movementY || (e as any).mozMovementY || (e as any).webkitMovementY || 0;
-        
-        // Apply yaw rotation (left-right) - allowing full 360° rotation
-        yawObject.current.rotation.y -= movementX * mouseSensitivity;
-        
-        // Apply pitch rotation (up-down) with limits to prevent flipping
-        const newPitchAngle = pitchObject.current.rotation.x - movementY * mouseSensitivity;
-        pitchObject.current.rotation.x = Math.max(
-          pitchLimitRef.current.min, 
-          Math.min(pitchLimitRef.current.max, newPitchAngle)
+      // Handle pointer lock state changes
+      const handlePointerLockChange = () => {
+        if (isInVR) return; // Don't change pointer lock in VR mode
+
+        setIsPointerLocked(
+          document.pointerLockElement === containerRef.current ||
+            (document as any).mozPointerLockElement === containerRef.current ||
+            (document as any).webkitPointerLockElement === containerRef.current
         );
-        
-        // Mark that renderer needs update
-        rendererNeedsUpdateRef.current = true;
       };
 
-      // Add mouse event listeners
-      document.addEventListener('mousedown', handleMouseDown);
-      document.addEventListener('mouseup', handleMouseUp);
-      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mousedown", handleMouseDown);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.addEventListener("pointerlockchange", handlePointerLockChange);
+      document.addEventListener(
+        "mozpointerlockchange",
+        handlePointerLockChange
+      );
+      document.addEventListener(
+        "webkitpointerlockchange",
+        handlePointerLockChange
+      );
 
-      // Set up keyboard controls with better responsiveness
+      // Set up keyboard controls with improved responsiveness
       const handleKeyDown = (e: KeyboardEvent) => {
+        if (isInVR) return; // Don't handle keyboard in VR mode
+
         let needsUpdate = false;
         switch (e.code) {
-          case 'KeyW':
+          case "KeyW":
             isMovingRef.current.forward = true;
             needsUpdate = true;
             break;
-          case 'KeyS':
+          case "KeyS":
             isMovingRef.current.backward = true;
             needsUpdate = true;
             break;
-          case 'KeyA':
+          case "KeyA":
             isMovingRef.current.left = true;
             needsUpdate = true;
             break;
-          case 'KeyD':
+          case "KeyD":
             isMovingRef.current.right = true;
             needsUpdate = true;
             break;
-          case 'KeyV':
+          case "Space":
+            isMovingRef.current.up = true;
+            needsUpdate = true;
+            break;
+          case "ShiftLeft":
+          case "ShiftRight":
+            isMovingRef.current.down = true;
+            needsUpdate = true;
+            break;
+          case "KeyV":
             // Toggle between first person and third person views
             toggleViewMode();
             needsUpdate = true;
             break;
-          case 'KeyM':
+          case "KeyM":
             // Toggle sound
-            setIsSoundEnabled(prev => !prev);
+            setIsSoundEnabled((prev) => !prev);
             break;
-          case 'Escape':
-            // Exit and close dialog
+          case "KeyL":
+            // Toggle pointer lock mode
+            if (document.pointerLockElement) {
+              exitPointerLock();
+            } else {
+              requestPointerLock();
+            }
+            break;
+          case "Escape":
+            // Exit and close street view
             onClose();
             break;
         }
-        
+
         if (needsUpdate) {
           rendererNeedsUpdateRef.current = true;
         }
       };
 
       const handleKeyUp = (e: KeyboardEvent) => {
+        if (isInVR) return; // Don't handle keyboard in VR mode
+
         let needsUpdate = false;
         switch (e.code) {
-          case 'KeyW':
+          case "KeyW":
             isMovingRef.current.forward = false;
             needsUpdate = true;
             break;
-          case 'KeyS':
+          case "KeyS":
             isMovingRef.current.backward = false;
             needsUpdate = true;
             break;
-          case 'KeyA':
+          case "KeyA":
             isMovingRef.current.left = false;
             needsUpdate = true;
             break;
-          case 'KeyD':
+          case "KeyD":
             isMovingRef.current.right = false;
             needsUpdate = true;
             break;
+          case "Space":
+            isMovingRef.current.up = false;
+            needsUpdate = true;
+            break;
+          case "ShiftLeft":
+          case "ShiftRight":
+            isMovingRef.current.down = false;
+            needsUpdate = true;
+            break;
         }
-        
+
         if (needsUpdate) {
           rendererNeedsUpdateRef.current = true;
         }
@@ -318,131 +503,256 @@ const StreetViewMode: React.FC<StreetViewModeProps> = ({
       // Toggle between first-person and third-person views
       const toggleViewMode = () => {
         if (!characterRef.current) return;
-        
+
         firstPersonModeRef.current = !firstPersonModeRef.current;
         characterRef.current.visible = !firstPersonModeRef.current;
         rendererNeedsUpdateRef.current = true;
       };
 
-      window.addEventListener('keydown', handleKeyDown);
-      window.addEventListener('keyup', handleKeyUp);
+      window.addEventListener("keydown", handleKeyDown);
+      window.addEventListener("keyup", handleKeyUp);
 
       // Disable right-click menu to allow for right mouse button controls
       const handleContextMenu = (e: Event) => {
         e.preventDefault();
       };
-      
-      containerRef.current.addEventListener('contextmenu', handleContextMenu);
 
-      // Animation loop with performance optimization
+      containerRef.current.addEventListener("contextmenu", handleContextMenu);
+
+      // Animation loop with improved performance optimizations
       clockRef.current.start();
-      let lastFrameTime = 0;
-      
-      const animate = () => {
-        if (!isOpen) return;
-        
-        animationFrameIdRef.current = requestAnimationFrame(animate);
-        
+
+      // Function to monitor performance and adjust quality settings
+      const monitorPerformance = (frameTime: number) => {
+        // Count frames for FPS calculation
+        frameCountRef.current++;
+
+        // Update FPS calculation every second
         const now = performance.now();
-        const elapsed = now - lastFrameTime;
-        
-        // Throttle FPS for better performance
-        if (elapsed > fpsInterval) {
-          // Get ready for next frame by setting lastFrameTime = now + any time adjustment
-          lastFrameTime = now - (elapsed % fpsInterval);
-          
+        if (now - lastFpsUpdateRef.current > 1000) {
+          const elapsedSecs = (now - lastFpsUpdateRef.current) / 1000;
+          currentFpsRef.current = frameCountRef.current / elapsedSecs;
+          frameCountRef.current = 0;
+          lastFpsUpdateRef.current = now;
+
+          // Adapt quality based on performance
+          if (currentFpsRef.current < 40 && adaptiveQualityRef.current > 0.5) {
+            adaptiveQualityRef.current = Math.max(
+              0.5,
+              adaptiveQualityRef.current - 0.1
+            );
+            if (rendererRef.current) {
+              rendererRef.current.setPixelRatio(
+                Math.min(
+                  window.devicePixelRatio * adaptiveQualityRef.current,
+                  1.5
+                )
+              );
+            }
+          } else if (
+            currentFpsRef.current > 55 &&
+            adaptiveQualityRef.current < 1.0
+          ) {
+            adaptiveQualityRef.current = Math.min(
+              1.0,
+              adaptiveQualityRef.current + 0.05
+            );
+            if (rendererRef.current) {
+              rendererRef.current.setPixelRatio(
+                Math.min(
+                  window.devicePixelRatio * adaptiveQualityRef.current,
+                  1.5
+                )
+              );
+            }
+          }
+        }
+      };
+
+      const animate = (timestamp: number) => {
+        if (!isOpen) return;
+
+        // If using WebXR, let it handle the animation loop
+        if (!isInVR) {
+          animationFrameIdRef.current = requestAnimationFrame(animate);
+        }
+
+        // Throttle rendering for consistent performance
+        const elapsed = timestamp - lastFrameTimeRef.current;
+
+        // Cap to target FPS
+        if (elapsed > fpsInterval || isInVR) {
+          // Calculate time adjustment factor for consistent motion
+          const frameCorrection = Math.min(elapsed / fpsInterval, 2.0); // Cap to avoid huge jumps
+
+          // Update time tracking
+          lastFrameTimeRef.current = timestamp - (elapsed % fpsInterval);
+
           try {
             // Handle character movement with collision detection
-            if (characterRef.current && yawObject.current) {
+            if (
+              characterRef.current &&
+              yawObject.current &&
+              pitchObject.current
+            ) {
+              const fixedDelta = (1 / 60) * frameCorrection;
+
               updateCharacterPosition({
                 characterRef,
                 yawObject,
+                pitchObject,
                 isMovingRef,
                 collisionMeshes: collisionMeshesRef.current,
-                delta: clockRef.current.getDelta(),
+                delta: fixedDelta,
                 footstepsAudio: footstepsAudioRef.current,
                 audioLoader: audioLoaderRef.current,
                 isSoundEnabled,
                 onPositionUpdate: (x, y) => {
-                  setPosition(prev => {
+                  setPosition((prev) => {
                     if (prev.x !== x || prev.y !== y) {
                       rendererNeedsUpdateRef.current = true;
                       return { ...prev, x, y };
                     }
                     return prev;
                   });
-                }
+                },
+                isInVR,
               });
             }
-            
-            // Only render if something has changed
-            if (rendererNeedsUpdateRef.current) {
-              if (rendererRef.current && sceneRef.current && cameraRef.current) {
+
+            if (rendererNeedsUpdateRef.current || isInVR) {
+              if (
+                rendererRef.current &&
+                sceneRef.current &&
+                cameraRef.current
+              ) {
                 rendererRef.current.render(sceneRef.current, cameraRef.current);
                 rendererNeedsUpdateRef.current = false;
+
+                // Monitor performance
+                if (!isInVR) {
+                  // Skip performance monitoring in VR mode
+                  monitorPerformance(elapsed);
+                }
               }
             }
           } catch (error) {
             console.error("Error in animation loop:", error);
-            setRenderError("An error occurred while rendering the scene. Please try again.");
+            setRenderError(
+              "An error occurred while rendering the scene. Please try again."
+            );
           }
         }
       };
-      
-      // Start the animation loop
-      animate();
-      
+
+      // Start the animation loop differently depending on VR mode
+      lastFrameTimeRef.current = performance.now();
+      lastFpsUpdateRef.current = performance.now();
+
+      // For WebXR, we need to use setAnimationLoop instead of requestAnimationFrame
+      if (renderer.xr) {
+        renderer.setAnimationLoop(animate);
+      } else {
+        animate(lastFrameTimeRef.current);
+      }
+
+      sceneInitializedRef.current = true;
+
       // Trigger an immediate render to prevent blank screen
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
       }
 
-      // Cleanup
+      // Cleanup function
       return () => {
-        window.removeEventListener('resize', handleResize);
-        window.removeEventListener('keydown', handleKeyDown);
-        window.removeEventListener('keyup', handleKeyUp);
-        document.removeEventListener('mousedown', handleMouseDown);
-        document.removeEventListener('mouseup', handleMouseUp);
-        document.removeEventListener('mousemove', handleMouseMove);
-        
+        console.log("Cleaning up Street View scene");
+        window.removeEventListener("resize", handleResize);
+        window.removeEventListener("keydown", handleKeyDown);
+        window.removeEventListener("keyup", handleKeyUp);
+        document.removeEventListener("mousedown", handleMouseDown);
+        document.removeEventListener("mouseup", handleMouseUp);
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener(
+          "pointerlockchange",
+          handlePointerLockChange
+        );
+        document.removeEventListener(
+          "mozpointerlockchange",
+          handlePointerLockChange
+        );
+        document.removeEventListener(
+          "webkitpointerlockchange",
+          handlePointerLockChange
+        );
+        clearTimeout(resizeTimeout);
+
         if (containerRef.current) {
-          containerRef.current.removeEventListener('contextmenu', handleContextMenu);
+          containerRef.current.removeEventListener(
+            "contextmenu",
+            handleContextMenu
+          );
         }
-        
+
         if (rendererRef.current && containerRef.current) {
           containerRef.current.removeChild(rendererRef.current.domElement);
+          renderer.setAnimationLoop(null); // Stop animation loop
         }
-        
+
         if (audioListenerRef.current && cameraRef.current) {
           cameraRef.current.remove(audioListenerRef.current);
         }
-        
+
         // Cancel animation frame
         if (animationFrameIdRef.current !== null) {
           cancelAnimationFrame(animationFrameIdRef.current);
         }
-        
+
+        // Exit pointer lock if active
+        if (document.pointerLockElement) {
+          exitPointerLock();
+        }
+
+        // Remove VR button if exists
+        if (vrButtonRef.current) {
+          document.body.removeChild(vrButtonRef.current);
+          vrButtonRef.current = null;
+        }
+
         // Clean up scene resources
         if (sceneRef.current) {
           sceneRef.current.traverse((object) => {
             if (object instanceof THREE.Mesh) {
               object.geometry.dispose();
               if (Array.isArray(object.material)) {
-                object.material.forEach(material => material.dispose());
+                object.material.forEach((material) => material.dispose());
               } else {
                 object.material.dispose();
               }
             }
           });
         }
+
+        sceneInitializedRef.current = false;
       };
     } catch (error) {
       console.error("Failed to initialize street view:", error);
-      setRenderError(`Failed to initialize street view: ${error instanceof Error ? error.message : "Unknown error"}`);
+      setRenderError(
+        `Failed to initialize street view: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
       return () => {};
     }
-  }, [isOpen, grid, currentTime, onClose, position.x, position.y]);
+  }, [
+    isOpen,
+    memoizedGrid,
+    currentTime,
+    onClose,
+    isSoundEnabled,
+    isPointerLocked,
+    isVRSupported,
+    isInVR,
+  ]);
 
   const buildCity = (scene: THREE.Scene, grid: GridItem[][]) => {
     try {
@@ -450,20 +760,20 @@ const StreetViewMode: React.FC<StreetViewModeProps> = ({
       grid.forEach((row, x) => {
         row.forEach((cell, y) => {
           if (cell.building) {
-            addBuildingToScene(cell.building, x, y, { 
-              scene, 
-              currentTime, 
-              collisionMeshes: collisionMeshesRef.current 
+            addBuildingToScene(cell.building, x, y, {
+              scene,
+              currentTime,
+              collisionMeshes: collisionMeshesRef.current,
             });
           }
         });
       });
 
       // Add environmental details for more realism
-      addEnvironmentalDetails(grid, { 
-        scene, 
-        collisionMeshes: collisionMeshesRef.current, 
-        currentTime 
+      addEnvironmentalDetails(grid, {
+        scene,
+        collisionMeshes: collisionMeshesRef.current,
+        currentTime,
       });
     } catch (error) {
       console.error("Error building city:", error);
@@ -471,66 +781,132 @@ const StreetViewMode: React.FC<StreetViewModeProps> = ({
     }
   };
 
+  // Function to enter VR mode with proper setup for Oculus Quest 2
+  const handleEnterVR = () => {
+    if (vrButtonRef.current) {
+      console.log("Entering VR mode - click detected");
+
+      // Ensure proper camera height for VR
+      if (characterRef.current && yawObject.current) {
+        // Set eye level for VR (approx. 1.6m standing height)
+        yawObject.current.position.y = 1.6;
+
+        // Ensure scene and camera are properly set for VR
+        if (sceneRef.current && cameraRef.current) {
+          // Make sure all content is visible in VR
+          rendererNeedsUpdateRef.current = true;
+
+          // Perform an immediate render before entering VR
+          rendererRef.current?.render(sceneRef.current, cameraRef.current);
+        }
+      }
+
+      // Click the WebXR VR button
+      vrButtonRef.current.click();
+
+      // Log VR entry for debugging
+      console.log("WebXR VR entry requested");
+    } else {
+      console.error("VR button not available");
+    }
+  };
+
   // Perform an initial render to prevent blank screen
   useEffect(() => {
-    if (isOpen && sceneRef.current && cameraRef.current && rendererRef.current) {
+    if (
+      isOpen &&
+      sceneRef.current &&
+      cameraRef.current &&
+      rendererRef.current
+    ) {
       rendererRef.current.render(sceneRef.current, cameraRef.current);
-      console.log("Performed initial render");
+      console.log("Performed initial Sustain City Street View render");
+
+      // Force multiple renders during first few frames to ensure content displays
+      let initialRenders = 0;
+      const ensureRendered = () => {
+        if (
+          initialRenders < 5 &&
+          rendererRef.current &&
+          sceneRef.current &&
+          cameraRef.current
+        ) {
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+          initialRenders++;
+          requestAnimationFrame(ensureRendered);
+        }
+      };
+
+      requestAnimationFrame(ensureRendered);
     }
   }, [isOpen]);
 
+  // If not open, don't render anything
+  if (!isOpen) return null;
+
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-5xl w-[95vw] h-[90vh] p-0 overflow-hidden">
-        <DialogTitle className="sr-only">Street View Mode</DialogTitle>
-        <DialogDescription className="sr-only">
-          Explore the city in 3D first-person view. Use W to move forward, S to move backward, and hold right-click to look around.
-        </DialogDescription>
-        
-        <div className="relative h-full w-full">
-          <div 
-            ref={containerRef} 
-            className="h-full w-full cursor-grab active:cursor-grabbing"
-            style={{ position: 'relative' }}
-          />
-          
-          {renderError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 text-white p-4 z-50">
-              <div className="bg-red-900 p-4 rounded-lg max-w-md text-center">
-                <h3 className="text-lg font-bold mb-2">Rendering Error</h3>
-                <p>{renderError}</p>
-                <button 
-                  className="mt-4 px-4 py-2 bg-white text-red-900 rounded font-medium"
-                  onClick={() => {
-                    setRenderError(null);
-                    // Force re-render by toggling the dialog
-                    onClose();
-                    setTimeout(() => {
-                      // This would require a small modification to the parent component
-                      // to allow reopening after a brief delay
-                      console.log("Attempting to reinitialize street view");
-                    }, 500);
-                  }}
-                >
-                  Try Again
-                </button>
-              </div>
+    <div className="fixed inset-0 z-50 bg-black">
+      <div className="relative h-full w-full">
+        <div
+          ref={containerRef}
+          className="h-full w-full cursor-grab active:cursor-grabbing"
+          style={{ position: "relative" }}
+        />
+
+        {renderError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 text-white p-4 z-50">
+            <div className="bg-red-900 p-4 rounded-lg max-w-md text-center">
+              <h3 className="text-lg font-bold mb-2">Rendering Error</h3>
+              <p>{renderError}</p>
+              <button
+                className="mt-4 px-4 py-2 bg-white text-red-900 rounded font-medium"
+                onClick={() => {
+                  setRenderError(null);
+                  sceneInitializedRef.current = false;
+                  onClose();
+                }}
+              >
+                Try Again
+              </button>
             </div>
-          )}
-          
-          <StreetViewTutorial 
-            isTransitioning={isTransitioning}
-            showTutorial={showTutorial}
-            position={position}
-            onClose={() => setShowTutorial(false)}
-          />
-          
-          <StreetViewControls onClose={onClose} />
-          <PositionIndicator position={position} />
-          <CityMiniMap grid={grid} position={position} />
-        </div>
-      </DialogContent>
-    </Dialog>
+          </div>
+        )}
+
+        <StreetViewTutorial
+          isTransitioning={isTransitioning}
+          showTutorial={showTutorial}
+          position={position}
+          onClose={() => setShowTutorial(false)}
+          isVRSupported={isVRSupported}
+        />
+
+        <StreetViewControls
+          onClose={onClose}
+          onEnterVR={handleEnterVR}
+          isVRSupported={isVRSupported}
+        />
+
+        {!isInVR && (
+          <>
+            <PositionIndicator position={position} />
+            <CityMiniMap grid={grid} position={position} />
+          </>
+        )}
+
+        {/* VR Mode Instructions */}
+        {!isInVR && (
+          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 px-3 py-1.5 bg-black/50 text-white text-sm rounded-md">
+            <p>
+              {isPointerLocked
+                ? "VR Mode: Look around freely. WASD to move, Space/Shift for up/down. Press ESC to exit."
+                : "Click in view to enable VR mode. WASD to move, Space/Shift for up/down, mouse to look."}
+              {isVRSupported &&
+                " Or use the Enter VR button to experience in Oculus Quest 2."}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 

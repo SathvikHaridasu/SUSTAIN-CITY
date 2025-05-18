@@ -1,16 +1,15 @@
-
-import React from 'react';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Save, FileSymlink, Plus } from 'lucide-react';
-import SeasonSelector from '@/components/SeasonSelector';
-import TimeOfDaySelector from '@/components/TimeOfDaySelector';
-import { Season } from '@/utils/seasons';
-import { TimeOfDay } from '@/utils/dayNightCycle';
-import { Achievement } from '@/utils/achievements';
-import { CityTemplate } from '@/utils/cityTemplates';
-import AchievementsPanel from '../AchievementsPanel';
-import CityTemplateSelector from '../CityTemplateSelector';
+import React from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Save, FileSymlink, Plus } from "lucide-react";
+import SeasonSelector from "@/components/SeasonSelector";
+import TimeOfDaySelector from "@/components/TimeOfDaySelector";
+import { Season } from "@/utils/seasons";
+import { TimeOfDay } from "@/utils/dayNightCycle";
+import { CityTemplate } from "@/utils/cityTemplates";
+import CityTemplateSelector from "../CityTemplateSelector";
+import RandomCityGenerator from "../RandomCityGenerator";
+import { GridItem } from "@/utils/environmental";
 
 interface CityToolbarProps {
   cityName: string;
@@ -23,8 +22,8 @@ interface CityToolbarProps {
   onSeasonChange: (season: Season) => void;
   currentTime: TimeOfDay;
   onTimeChange: (time: TimeOfDay) => void;
-  achievements: Achievement[];
   onSelectTemplate: (template: CityTemplate) => void;
+  onGridUpdate: (grid: GridItem[][]) => void;
 }
 
 const CityToolbar: React.FC<CityToolbarProps> = ({
@@ -38,8 +37,8 @@ const CityToolbar: React.FC<CityToolbarProps> = ({
   onSeasonChange,
   currentTime,
   onTimeChange,
-  achievements,
-  onSelectTemplate
+  onSelectTemplate,
+  onGridUpdate,
 }) => {
   return (
     <div className="flex items-center gap-4 flex-wrap">
@@ -51,7 +50,7 @@ const CityToolbar: React.FC<CityToolbarProps> = ({
           placeholder="City Name"
         />
       </div>
-      
+
       <div className="flex items-center gap-2">
         <Button
           onClick={onSave}
@@ -61,9 +60,9 @@ const CityToolbar: React.FC<CityToolbarProps> = ({
           className="flex items-center gap-1.5"
         >
           <Save className="h-4 w-4" />
-          <span>{isSaving ? 'Saving...' : 'Save City'}</span>
+          <span>{isSaving ? "Saving..." : "Save City"}</span>
         </Button>
-        
+
         <Button
           onClick={onNewCity}
           disabled={isSaving || isLoading}
@@ -74,20 +73,20 @@ const CityToolbar: React.FC<CityToolbarProps> = ({
           <Plus className="h-4 w-4" />
           <span>New City</span>
         </Button>
-        
+
+        <RandomCityGenerator onGridGenerated={onGridUpdate} />
+
         <CityTemplateSelector onSelectTemplate={onSelectTemplate} />
-        
-        <SeasonSelector 
+
+        <SeasonSelector
           currentSeason={currentSeason}
           onSeasonChange={onSeasonChange}
         />
-        
+
         <TimeOfDaySelector
           currentTime={currentTime}
           onTimeChange={onTimeChange}
         />
-        
-        <AchievementsPanel achievements={achievements} />
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -15,16 +15,20 @@ const StreetViewPegman: React.FC<StreetViewPegmanProps> = ({ onEnterStreetView, 
   const pegmanRef = useRef<HTMLDivElement>(null);
   const originalPositionRef = useRef({ x: 0, y: 0 });
   const { toast } = useToast();
+  const [hasShownTutorial, setHasShownTutorial] = useState(false);
 
   useEffect(() => {
-    // Show tutorial toast once
-    toast({
-      title: "Street View Available",
-      description: "Drag & drop the pegman onto the map to explore street view!",
-    });
-  }, [toast]);
+    // Show tutorial toast only once
+    if (!hasShownTutorial) {
+      toast({
+        title: "Street View Available",
+        description: "Click or drag & drop the pegman to explore street view!",
+      });
+      setHasShownTutorial(true);
+    }
+  }, [toast, hasShownTutorial]);
 
-  const handleDragStart = (e: React.MouseEvent) => {
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     if (!pegmanRef.current) return;
     
@@ -42,19 +46,25 @@ const StreetViewPegman: React.FC<StreetViewPegmanProps> = ({ onEnterStreetView, 
     
     // Show visual feedback
     document.body.classList.add('dragging-pegman');
-  };
+    
+    // Update initial position
+    setPosition({
+      x: e.clientX - 20, // Offset for centering
+      y: e.clientY - 20  // Offset for centering
+    });
+  }, []);
 
-  const handleDrag = (e: MouseEvent) => {
-    if (!isDragging || !pegmanRef.current) return;
+  const handleDrag = useCallback((e: MouseEvent) => {
+    if (!isDragging) return;
     
     // Update pegman position to follow cursor
     setPosition({
       x: e.clientX - 20, // Offset for centering
       y: e.clientY - 20  // Offset for centering
     });
-  };
+  }, [isDragging]);
 
-  const handleDragEnd = (e: MouseEvent) => {
+  const handleDragEnd = useCallback((e: MouseEvent) => {
     if (!isDragging || !containerRef.current || !pegmanRef.current) return;
     
     setIsDragging(false);
@@ -76,13 +86,21 @@ const StreetViewPegman: React.FC<StreetViewPegmanProps> = ({ onEnterStreetView, 
       const gridX = Math.floor(((e.clientX - mapRect.left) / mapRect.width) * 20);
       const gridY = Math.floor(((e.clientY - mapRect.top) / mapRect.height) * 20);
       
-      // Enter street view at this position
-      onEnterStreetView({ x: gridX, y: gridY });
+      // Enter street view at this position with a delay for animation
+      setTimeout(() => {
+        onEnterStreetView({ x: gridX, y: gridY });
+      }, 100);
       
       // Reset pegman position with animation
       setTimeout(() => {
         setPosition({ x: 0, y: 0 });
       }, 100);
+      
+      // Show a success toast
+      toast({
+        title: "Entering Street View",
+        description: `Exploring position (${gridX}, ${gridY})`,
+      });
     } else {
       // Reset position if dropped outside map with spring-back animation
       setPosition({ x: 0, y: 0 });
@@ -96,31 +114,84 @@ const StreetViewPegman: React.FC<StreetViewPegmanProps> = ({ onEnterStreetView, 
         }, 500);
       }
     }
-  };
+  }, [isDragging, containerRef, onEnterStreetView, toast]);
+
+  // Enhanced handleClick function to support direct clicking
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    
+    // Don't trigger click when starting a drag
+    if (isDragging) return;
+    
+    if (!containerRef.current || !pegmanRef.current) return;
+    
+    // Find a good position in the middle of the map
+    const centerX = Math.floor(10); // Center of 20x20 grid
+    const centerY = Math.floor(10); // Center of 20x20 grid
+    
+    // Animate pegman
+    pegmanRef.current.classList.add('animate-pulse');
+    setTimeout(() => {
+      if (pegmanRef.current) {
+        pegmanRef.current.classList.remove('animate-pulse');
+      }
+    }, 500);
+    
+    // Enter street view at center position with delay for animation
+    setTimeout(() => {
+      onEnterStreetView({ x: centerX, y: centerY });
+    }, 100);
+    
+    // Show a success toast
+    toast({
+      title: "Entering Street View",
+      description: `Quick jump to center position (${centerX}, ${centerY})`,
+    });
+  }, [isDragging, containerRef, onEnterStreetView, toast]);
 
   useEffect(() => {
     if (isDragging) {
       window.addEventListener('mousemove', handleDrag);
       window.addEventListener('mouseup', handleDragEnd);
+      
+      // Also handle touch events for mobile
+      window.addEventListener('touchmove', (e) => handleDrag(e.touches[0] as unknown as MouseEvent));
+      window.addEventListener('touchend', (e) => {
+        if (e.changedTouches && e.changedTouches.length > 0) {
+          handleDragEnd(e.changedTouches[0] as unknown as MouseEvent);
+        }
+      });
     }
     
     return () => {
       window.removeEventListener('mousemove', handleDrag);
       window.removeEventListener('mouseup', handleDragEnd);
+      window.removeEventListener('touchmove', (e) => handleDrag(e.touches[0] as unknown as MouseEvent));
+      window.removeEventListener('touchend', (e) => {
+        if (e.changedTouches && e.changedTouches.length > 0) {
+          handleDragEnd(e.changedTouches[0] as unknown as MouseEvent);
+        }
+      });
     };
-  }, [isDragging, containerRef]);
+  }, [isDragging, handleDrag, handleDragEnd]);
 
   return (
     <div className="relative">
       <div
         ref={pegmanRef}
-        className={`flex items-center justify-center bg-white border-2 border-primary rounded-full p-1.5 cursor-grab shadow-md transition-all duration-300 ${isDragging ? 'cursor-grabbing shadow-lg z-50 fixed' : 'hover:bg-primary/10'}`}
+        className={`flex items-center justify-center bg-white border-2 border-primary rounded-full p-1.5 cursor-pointer shadow-md transition-all duration-300 ${isDragging ? 'cursor-grabbing shadow-lg z-50 fixed' : 'hover:bg-primary/10'}`}
         style={
           isDragging 
             ? { position: 'fixed', left: `${position.x}px`, top: `${position.y}px` } 
             : {}
         }
         onMouseDown={handleDragStart}
+        onClick={handleClick}
+        onTouchStart={(e) => {
+          e.preventDefault();
+          handleDragStart(e as unknown as React.MouseEvent);
+        }}
+        title="Click to enter Street View at center, or drag to a specific location"
       >
         <User size={24} className="text-primary" />
       </div>
